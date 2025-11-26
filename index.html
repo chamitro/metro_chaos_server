@@ -1,0 +1,87 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Metro Chaos Multiplayer Server</title>
+  <style>
+    body {
+      margin: 0;
+      font-family: system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      text-align: center;
+      padding: 20px;
+    }
+    .container {
+      max-width: 600px;
+    }
+    h1 {
+      font-size: 48px;
+      margin-bottom: 20px;
+    }
+    p {
+      font-size: 18px;
+      opacity: 0.9;
+      line-height: 1.6;
+    }
+    .status {
+      background: rgba(255, 255, 255, 0.1);
+      padding: 20px;
+      border-radius: 12px;
+      margin: 30px 0;
+    }
+    .btn {
+      display: inline-block;
+      padding: 15px 30px;
+      background: white;
+      color: #667eea;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: 600;
+      margin-top: 20px;
+      transition: transform 0.2s;
+    }
+    .btn:hover {
+      transform: scale(1.05);
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🎮 Metro Chaos</h1>
+    <h2>Multiplayer Server</h2>
+    
+    <div class="status">
+      <p><strong>Server Status:</strong> <span id="status">Checking...</span></p>
+      <p><strong>Active Rooms:</strong> <span id="rooms">-</span></p>
+      <p><strong>Active Players:</strong> <span id="players">-</span></p>
+    </div>
+    
+    <p>This is the multiplayer server for Metro Chaos Versus Mode.</p>
+    <p>To play the game, visit:</p>
+    
+    <a href="https://chamitro.github.io/metrochaos/metro-chaos.html" class="btn">
+      Play Metro Chaos
+    </a>
+  </div>
+
+  <script>
+    // Check server health
+    fetch('/health')
+      .then(res => res.json())
+      .then(data => {
+        document.getElementById('status').textContent = '✅ Online';
+        document.getElementById('rooms').textContent = data.rooms;
+        document.getElementById('players').textContent = data.players;
+      })
+      .catch(() => {
+        document.getElementById('status').textContent = '❌ Offline';
+      });
+  </script>
+</body>
+</html>
