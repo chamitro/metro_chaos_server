@@ -165,9 +165,10 @@ function handleStartMatch(ws, payload) {
   
   // Notify both players to start
   const startPayload = {
-    startTime: room.startTime,
-    rules: room.rules
-  };
+  startTime: room.startTime,
+  rules: room.rules,
+  seed: payload.seed  // ← ADD THIS ONE LINE
+};
   
   room.host.send(JSON.stringify({
     type: 'MATCH_START',
