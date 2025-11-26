@@ -167,7 +167,7 @@ function handleStartMatch(ws, payload) {
   const startPayload = {
   startTime: room.startTime,
   rules: room.rules,
-  seed: payload.seed  // ← ADD THIS ONE LINE
+  seed: payload.seed  // ← ADD THIS LINE!
 };
   
   room.host.send(JSON.stringify({
