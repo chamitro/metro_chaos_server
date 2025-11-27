@@ -54,6 +54,9 @@ function handleMessage(ws, message) {
     case 'GAME_UPDATE':
       handleGameUpdate(ws, payload);
       break;
+    case 'PLAYER_LOST':
+      handlePlayerLost(ws, payload);
+      break;
     case 'OVERLOAD_ATTACK':
       handleOverloadAttack(ws, payload);
       break;
@@ -203,6 +206,24 @@ function handleGameUpdate(ws, payload) {
   }
 }
 
+function handlePlayerLost(ws, payload) {
+  const playerInfo = players.get(ws);
+  if (!playerInfo) return;
+  
+  const room = rooms.get(playerInfo.roomCode);
+  if (!room || !room.gameStarted) return;
+  
+  // Forward loss notification to opponent
+  const opponent = playerInfo.isHost ? room.opponent : room.host;
+  if (opponent && opponent.readyState === WebSocket.OPEN) {
+    opponent.send(JSON.stringify({
+      type: 'PLAYER_LOST',
+      payload: payload
+    }));
+    console.log(`Player in room ${playerInfo.roomCode} lost: ${payload.reason}`);
+  }
+}
+
 function handleOverloadAttack(ws, payload) {
   const playerInfo = players.get(ws);
   if (!playerInfo) return;
@@ -217,8 +238,7 @@ function handleOverloadAttack(ws, payload) {
       type: 'OVERLOAD_ATTACK',
       payload: payload
     }));
-    
-    console.log(`Overload attack sent from ${playerInfo.name} in room ${playerInfo.roomCode}`);
+    console.log(`Overload attack in room ${playerInfo.roomCode}`);
   }
 }
 
