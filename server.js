@@ -54,6 +54,9 @@ function handleMessage(ws, message) {
     case 'GAME_UPDATE':
       handleGameUpdate(ws, payload);
       break;
+    case 'OVERLOAD_ATTACK':
+      handleOverloadAttack(ws, payload);
+      break;
     case 'LEAVE_ROOM':
       handleLeaveRoom(ws);
       break;
@@ -167,7 +170,7 @@ function handleStartMatch(ws, payload) {
   const startPayload = {
   startTime: room.startTime,
   rules: room.rules,
-  seed: payload.seed  // ← ADD THIS LINE!
+  seed: payload.seed  // ← ADD THIS ONE LINE
 };
   
   room.host.send(JSON.stringify({
@@ -197,6 +200,25 @@ function handleGameUpdate(ws, payload) {
       type: 'OPPONENT_UPDATE',
       payload: payload
     }));
+  }
+}
+
+function handleOverloadAttack(ws, payload) {
+  const playerInfo = players.get(ws);
+  if (!playerInfo) return;
+  
+  const room = rooms.get(playerInfo.roomCode);
+  if (!room || !room.gameStarted) return;
+  
+  // Forward attack to opponent
+  const opponent = playerInfo.isHost ? room.opponent : room.host;
+  if (opponent && opponent.readyState === WebSocket.OPEN) {
+    opponent.send(JSON.stringify({
+      type: 'OVERLOAD_ATTACK',
+      payload: payload
+    }));
+    
+    console.log(`Overload attack sent from ${playerInfo.name} in room ${playerInfo.roomCode}`);
   }
 }
 
