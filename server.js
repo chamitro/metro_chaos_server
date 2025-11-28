@@ -48,6 +48,9 @@ function handleMessage(ws, message) {
     case 'JOIN_ROOM':
       handleJoinRoom(ws, payload);
       break;
+    case 'FIND_QUICK_MATCH':
+      handleFindQuickMatch(ws, payload);
+      break;
     case 'START_MATCH':
       handleStartMatch(ws, payload);
       break;
@@ -145,6 +148,69 @@ function handleJoinRoom(ws, payload) {
   }));
   
   console.log(`${room.opponentName} joined room ${roomCode}`);
+}
+
+function handleFindQuickMatch(ws, payload) {
+  console.log('🔍 Finding Quick Match...');
+  
+  // Look for an existing Quick Match room waiting for opponent
+  let foundRoom = null;
+  
+  for (const [code, room] of rooms.entries()) {
+    // Check if room has Quick Match rules and is waiting for opponent
+    const isQuickMatch = 
+      room.rules.duration === 10 &&
+      room.rules.winCondition === 'passengers' &&
+      room.rules.maxConnections === 3 &&
+      room.rules.startMoney === 0;
+    
+    if (isQuickMatch && !room.opponent && room.host.readyState === WebSocket.OPEN) {
+      foundRoom = { code, room };
+      break;
+    }
+  }
+  
+  if (foundRoom) {
+    // Found a Quick Match room! Join it
+    console.log(`✅ Found Quick Match room: ${foundRoom.code}`);
+    
+    const room = foundRoom.room;
+    const roomCode = foundRoom.code;
+    
+    // Add opponent to room
+    room.opponent = ws;
+    room.opponentName = 'Player 2';
+    players.set(ws, { roomCode, isHost: false, name: room.opponentName });
+    
+    // Notify both players
+    const matchFoundPayload = {
+      roomCode,
+      rules: room.rules,
+      hostName: room.hostName,
+      opponentName: room.opponentName
+    };
+    
+    // Tell opponent they joined
+    ws.send(JSON.stringify({
+      type: 'MATCH_FOUND',
+      payload: { ...matchFoundPayload, isHost: false }
+    }));
+    
+    // Tell host opponent joined
+    room.host.send(JSON.stringify({
+      type: 'MATCH_FOUND',
+      payload: { ...matchFoundPayload, isHost: true }
+    }));
+    
+    console.log(`Quick Match: ${room.opponentName} joined ${room.hostName}'s room`);
+  } else {
+    // No room found, tell client to create one
+    console.log('❌ No Quick Match room found');
+    ws.send(JSON.stringify({
+      type: 'NO_QUICK_MATCH_FOUND',
+      payload: {}
+    }));
+  }
 }
 
 function handleStartMatch(ws, payload) {
