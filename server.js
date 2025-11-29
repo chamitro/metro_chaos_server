@@ -51,6 +51,9 @@ function handleMessage(ws, message) {
     case 'FIND_QUICK_MATCH':
       handleFindQuickMatch(ws, payload);
       break;
+    case 'DELETE_ROOM':
+      handleDeleteRoom(ws, payload);
+      break;
     case 'START_MATCH':
       handleStartMatch(ws, payload);
       break;
@@ -211,6 +214,41 @@ function handleFindQuickMatch(ws, payload) {
       payload: {}
     }));
   }
+}
+
+function handleDeleteRoom(ws, payload) {
+  const { roomCode } = payload;
+  
+  // Verify the requester is the host of this room
+  const playerInfo = players.get(ws);
+  if (!playerInfo || playerInfo.roomCode !== roomCode || !playerInfo.isHost) {
+    console.log(`⚠️ Non-host tried to delete room ${roomCode}`);
+    return;
+  }
+  
+  const room = rooms.get(roomCode);
+  if (!room) {
+    console.log(`⚠️ Room ${roomCode} not found for deletion`);
+    return;
+  }
+  
+  // Only allow deletion if no opponent has joined yet
+  if (room.opponent) {
+    console.log(`⚠️ Cannot delete room ${roomCode} - opponent already joined`);
+    return;
+  }
+  
+  // Delete the room
+  rooms.delete(roomCode);
+  players.delete(ws);
+  
+  console.log(`🗑️ Room ${roomCode} deleted by host (Quick Match canceled)`);
+  
+  // Confirm deletion to client
+  ws.send(JSON.stringify({
+    type: 'ROOM_DELETED',
+    payload: { roomCode }
+  }));
 }
 
 function handleStartMatch(ws, payload) {
