@@ -39,7 +39,9 @@ wss.on('connection', (ws) => {
 });
 
 function handleMessage(ws, message) {
-  const { type, payload } = message;
+  if (!message || typeof message !== 'object') return;
+  const type = message.type;
+  const payload = (message.payload && typeof message.payload === 'object') ? message.payload : {};
   
   switch (type) {
     case 'CREATE_ROOM':
@@ -50,9 +52,6 @@ function handleMessage(ws, message) {
       break;
     case 'FIND_QUICK_MATCH':
       handleFindQuickMatch(ws, payload);
-      break;
-    case 'DELETE_ROOM':
-      handleDeleteRoom(ws, payload);
       break;
     case 'START_MATCH':
       handleStartMatch(ws, payload);
@@ -74,7 +73,8 @@ function handleMessage(ws, message) {
   }
 }
 
-function handleCreateRoom(ws, payload) {
+function handleCreateRoom(ws, payload, quickMatch = false) {
+  if (players.has(ws)) handleLeaveRoom(ws); // leave any previous room first
   const roomCode = generateRoomCode();
   const { rules, playerName } = payload;
   
@@ -89,6 +89,7 @@ function handleCreateRoom(ws, payload) {
     startTime: Date.now()
   };
   
+  room.quickMatch = quickMatch;
   rooms.set(roomCode, room);
   players.set(ws, { roomCode, isHost: true, name: room.hostName });
   
@@ -98,7 +99,8 @@ function handleCreateRoom(ws, payload) {
     payload: {
       roomCode,
       rules,
-      playerName: room.hostName
+      playerName: room.hostName,
+      quickMatch
     }
   }));
   
@@ -106,7 +108,8 @@ function handleCreateRoom(ws, payload) {
 }
 
 function handleJoinRoom(ws, payload) {
-  const { roomCode, playerName } = payload;
+  const { playerName } = payload;
+  const roomCode = String(payload.roomCode || '').trim().toUpperCase();
   const room = rooms.get(roomCode);
   
   if (!room) {
@@ -117,13 +120,19 @@ function handleJoinRoom(ws, payload) {
     return;
   }
   
-  if (room.opponent) {
+  if (room.opponent || room.host === ws) {
     ws.send(JSON.stringify({
       type: 'ERROR',
       payload: { message: 'Room is full' }
     }));
     return;
   }
+  if (room.host.readyState !== WebSocket.OPEN) {
+    rooms.delete(roomCode);
+    ws.send(JSON.stringify({ type: 'ERROR', payload: { message: 'Room not found' } }));
+    return;
+  }
+  if (players.has(ws)) handleLeaveRoom(ws);
   
   // Add opponent to room
   room.opponent = ws;
@@ -145,110 +154,40 @@ function handleJoinRoom(ws, payload) {
   }));
   
   // Tell host opponent joined
-  room.host.send(JSON.stringify({
-    type: 'MATCH_FOUND',
-    payload: { ...matchFoundPayload, isHost: true }
-  }));
-  
+  if (room.host.readyState === WebSocket.OPEN) {
+    room.host.send(JSON.stringify({
+      type: 'MATCH_FOUND',
+      payload: { ...matchFoundPayload, isHost: true }
+    }));
+  }
+
   console.log(`${room.opponentName} joined room ${roomCode}`);
 }
 
 function handleFindQuickMatch(ws, payload) {
   console.log('🔍 Finding Quick Match...');
-  
-  // Look for an existing Quick Match room waiting for opponent
-  let foundRoom = null;
-  
+
+  // Look for an open Quick Match room that belongs to someone else
   for (const [code, room] of rooms.entries()) {
-    // Check if room has Quick Match rules and is waiting for opponent
-    const isQuickMatch = 
-      room.rules.duration === 10 &&
-      room.rules.winCondition === 'passengers' &&
-      room.rules.maxConnections === 3 &&
-      room.rules.startMoney === 0;
-    
-    if (isQuickMatch && !room.opponent && room.host.readyState === WebSocket.OPEN) {
-      foundRoom = { code, room };
-      break;
+    const isQuickMatch = room.quickMatch ||
+      (room.rules &&
+       room.rules.duration === 10 &&
+       room.rules.winCondition === 'passengers' &&
+       room.rules.maxConnections === 3 &&
+       room.rules.startMoney === 0);
+
+    if (isQuickMatch && !room.opponent && !room.gameStarted &&
+        room.host !== ws && room.host.readyState === WebSocket.OPEN) {
+      console.log(`✅ Found Quick Match room: ${code}`);
+      handleJoinRoom(ws, { roomCode: code, playerName: 'Player 2' });
+      return;
     }
   }
-  
-  if (foundRoom) {
-    // Found a Quick Match room! Join it
-    console.log(`✅ Found Quick Match room: ${foundRoom.code}`);
-    
-    const room = foundRoom.room;
-    const roomCode = foundRoom.code;
-    
-    // Add opponent to room
-    room.opponent = ws;
-    room.opponentName = 'Player 2';
-    players.set(ws, { roomCode, isHost: false, name: room.opponentName });
-    
-    // Notify both players
-    const matchFoundPayload = {
-      roomCode,
-      rules: room.rules,
-      hostName: room.hostName,
-      opponentName: room.opponentName
-    };
-    
-    // Tell opponent they joined
-    ws.send(JSON.stringify({
-      type: 'MATCH_FOUND',
-      payload: { ...matchFoundPayload, isHost: false }
-    }));
-    
-    // Tell host opponent joined
-    room.host.send(JSON.stringify({
-      type: 'MATCH_FOUND',
-      payload: { ...matchFoundPayload, isHost: true }
-    }));
-    
-    console.log(`Quick Match: ${room.opponentName} joined ${room.hostName}'s room`);
-  } else {
-    // No room found, tell client to create one
-    console.log('❌ No Quick Match room found');
-    ws.send(JSON.stringify({
-      type: 'NO_QUICK_MATCH_FOUND',
-      payload: {}
-    }));
-  }
-}
 
-function handleDeleteRoom(ws, payload) {
-  const { roomCode } = payload;
-  
-  // Verify the requester is the host of this room
-  const playerInfo = players.get(ws);
-  if (!playerInfo || playerInfo.roomCode !== roomCode || !playerInfo.isHost) {
-    console.log(`⚠️ Non-host tried to delete room ${roomCode}`);
-    return;
-  }
-  
-  const room = rooms.get(roomCode);
-  if (!room) {
-    console.log(`⚠️ Room ${roomCode} not found for deletion`);
-    return;
-  }
-  
-  // Only allow deletion if no opponent has joined yet
-  if (room.opponent) {
-    console.log(`⚠️ Cannot delete room ${roomCode} - opponent already joined`);
-    return;
-  }
-  
-  // Delete the room
-  rooms.delete(roomCode);
-  players.delete(ws);
-  
-  console.log(`🗑️ Room ${roomCode} deleted by host (Quick Match canceled)`);
-  
-  // Confirm deletion to client
-  ws.send(JSON.stringify({
-    type: 'ROOM_DELETED',
-    payload: { roomCode }
-  }));
+  // Nobody is waiting: open a Quick Match room for this player. The next player who
+  // searches will be paired with it (two simultaneous searchers used to each open a room).
+  console.log('💡 No Quick Match room found, creating one');
+  handleCreateRoom(ws, { rules: payload, playerName: 'Player 1' }, true);
 }
 
 function handleStartMatch(ws, payload) {
@@ -275,20 +214,16 @@ function handleStartMatch(ws, payload) {
   
   // Notify both players to start
   const startPayload = {
-  startTime: room.startTime,
-  rules: room.rules,
-  seed: payload.seed  // ← ADD THIS ONE LINE
-};
-  
-  room.host.send(JSON.stringify({
-    type: 'MATCH_START',
-    payload: startPayload
-  }));
-  
-  room.opponent.send(JSON.stringify({
-    type: 'MATCH_START',
-    payload: startPayload
-  }));
+    startTime: room.startTime,
+    rules: room.rules,
+    seed: Number.isFinite(payload.seed) ? payload.seed : Math.floor(Math.random() * 1000000)
+  };
+
+  for (const sock of [room.host, room.opponent]) {
+    if (sock.readyState === WebSocket.OPEN) {
+      sock.send(JSON.stringify({ type: 'MATCH_START', payload: startPayload }));
+    }
+  }
   
   console.log(`Match started in room ${playerInfo.roomCode}`);
 }
@@ -351,8 +286,11 @@ function handleLeaveRoom(ws) {
   if (!playerInfo) return;
   
   const room = rooms.get(playerInfo.roomCode);
-  if (!room) return;
-  
+  if (!room) {
+    players.delete(ws);
+    return;
+  }
+
   // Notify other player
   const opponent = playerInfo.isHost ? room.opponent : room.host;
   if (opponent && opponent.readyState === WebSocket.OPEN) {
@@ -362,8 +300,9 @@ function handleLeaveRoom(ws) {
     }));
   }
   
-  // Clean up
+  // Clean up both players' mappings (the opponent's entry used to leak)
   players.delete(ws);
+  if (opponent) players.delete(opponent);
   rooms.delete(playerInfo.roomCode);
   
   console.log(`Player left room ${playerInfo.roomCode}`);
@@ -399,7 +338,10 @@ setInterval(() => {
   const ROOM_TIMEOUT = 30 * 60 * 1000; // 30 minutes
   
   for (const [code, room] of rooms.entries()) {
-    if (!room.gameStarted && room.startTime && now - room.startTime > ROOM_TIMEOUT) {
+    const hostGone = room.host.readyState !== WebSocket.OPEN;
+    if (hostGone || (!room.gameStarted && room.startTime && now - room.startTime > ROOM_TIMEOUT)) {
+      players.delete(room.host);
+      if (room.opponent) players.delete(room.opponent);
       rooms.delete(code);
       console.log(`Cleaned up inactive room ${code}`);
     }
